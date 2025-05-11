@@ -1,0 +1,50 @@
+name: "BugBot Context"
+description: "Fetch PR diff, package changed files into a ZIP, and upload both as artifacts."
+inputs:
+  base-ref:
+    description: "The git ref to diff against (e.g. main)"
+    required: false
+    default: "main"
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate diff
+      id: get_diff
+      shell: bash
+      run: |
+        export merge_base=$(git merge-base HEAD "origin/${{ inputs.base-ref }}")
+        git diff "$merge_base" HEAD -U50 > pr_diff.txt
+
+    - name: Upload diff artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: pr-diff
+        path: pr_diff.txt
+
+    - name: Prepare ZIP of changed files
+      id: prepare_zip
+      shell: bash
+      run: |
+        zip_file="changed_files_archive.zip"
+        staging=$(mktemp -d)
+        merge_base=$(git merge-base HEAD "origin/${{ inputs.base-ref }}")
+        git diff --name-only -z "$merge_base" HEAD \
+          | while IFS= read -r -d '' f; do
+              if [ -f "$f" ]; then
+                mkdir -p "$staging/$(dirname "$f")"
+                cp "$f" "$staging/$f"
+              fi
+            done
+        (cd "$staging" && zip -qr "$GITHUB_WORKSPACE/$zip_file" .)
+        echo "zip-path=$GITHUB_WORKSPACE/$zip_file" >> "$GITHUB_OUTPUT"
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: changed-files-archive
+        path: ${{ steps.prepare_zip.outputs.zip-path }}
