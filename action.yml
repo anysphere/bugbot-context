@@ -1,6 +1,10 @@
 name: "BugBot Context"
 description: "Fetch PR diff, package changed files into a ZIP, and upload both as artifacts."
-inputs: {}
+inputs:
+  github-token:
+    description: "GitHub token for GraphQL and API calls"
+    required: true
+
 runs:
   using: "composite"
   steps:
@@ -13,7 +17,7 @@ runs:
       id: find_merge_base
       uses: actions/github-script@v6
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        github-token: ${{ inputs.github-token }}
         script: |
           const { repository } = await github.graphql(
             `
