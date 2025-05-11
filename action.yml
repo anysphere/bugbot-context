@@ -1,24 +1,48 @@
 name: "BugBot Context"
 description: "Fetch PR diff, package changed files into a ZIP, and upload both as artifacts."
-inputs:
-  base-ref:
-    description: "The git ref to diff against (e.g. main)"
-    required: false
-    default: "main"
+inputs: {}
 runs:
   using: "composite"
   steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
+        fetch-depth: 1
+
+    - name: Determine merge-base SHA
+      id: find_merge_base
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const { repository } = await github.graphql(
+            `
+            query($owner:String!,$repo:String!,$prNumber:Int!) {
+              repository(owner:$owner,name:$repo) {
+                pullRequest(number:$prNumber) {
+                  mergeBaseRefOid
+                }
+              }
+            }`,
+            {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              prNumber: context.issue.number
+            }
+          );
+          return repository.pullRequest.mergeBaseRefOid;
+        result-encoding: string
+
+    - name: Fetch merge-base commit
+      shell: bash
+      run: |
+        git fetch --no-tags --depth=1 origin ${{ steps.find_merge_base.outputs.result }}
 
     - name: Generate diff
       id: get_diff
       shell: bash
       run: |
-        export merge_base=$(git merge-base HEAD "origin/${{ inputs.base-ref }}")
-        git diff "$merge_base" HEAD -U50 > pr_diff.txt
+        git diff ${{ steps.find_merge_base.outputs.result }} HEAD -U50 > pr_diff.txt
 
     - name: Upload diff artifact
       uses: actions/upload-artifact@v4
@@ -32,8 +56,7 @@ runs:
       run: |
         zip_file="changed_files_archive.zip"
         staging=$(mktemp -d)
-        merge_base=$(git merge-base HEAD "origin/${{ inputs.base-ref }}")
-        git diff --name-only -z "$merge_base" HEAD \
+        git diff --name-only -z ${{ steps.find_merge_base.outputs.result }} HEAD \
           | while IFS= read -r -d '' f; do
               if [ -f "$f" ]; then
                 mkdir -p "$staging/$(dirname "$f")"
